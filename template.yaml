@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Chrombda - Lambda-based screenshot service using headless Chrome
+
+# To schedule screenshots via CloudWatch Events, create a rule targeting
+# the ScreenshotFunction with this input format:
+#
+#   {"source": "aws.events", "detail": {"url": "https://example.com"}}
+#
+# Use create-schedule.sh to set up a rule, or manually:
+#   aws events put-rule --name my-screenshot --schedule-expression "rate(1 hour)"
+#   aws events put-targets --rule my-screenshot --targets \
+#     Id=chrombda,Arn=<FunctionArn>,Input='{"source":"aws.events","detail":{"url":"https://example.com"}}'
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+  ImageUri:
+    Type: String
+    Description: ECR image URI for the Lambda function
+
+Resources:
+  ScreenshotBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "chrombda-${Environment}-screenshots-${AWS::AccountId}"
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "chrombda-${Environment}-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub "${ScreenshotBucket.Arn}/*"
+
+  ScreenshotFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "chrombda-${Environment}"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      Role: !GetAtt LambdaRole.Arn
+      MemorySize: 4096
+      Timeout: 60
+      EphemeralStorage:
+        Size: 1024
+      Environment:
+        Variables:
+          SCREENSHOT_BUCKET: !Ref ScreenshotBucket
+
+  # Allow EventBridge to invoke the function
+  EventsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScreenshotFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/chrombda-${Environment}"
+      RetentionInDays: 14
+
+  FunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ScreenshotFunction.Arn
+      AuthType: NONE
+
+  FunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScreenshotFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+Outputs:
+  FunctionUrl:
+    Description: Lambda Function URL
+    Value: !GetAtt FunctionUrl.FunctionUrl
+  BucketName:
+    Description: S3 bucket for screenshots
+    Value: !Ref ScreenshotBucket
+  FunctionArn:
+    Description: Lambda function ARN (use this when creating EventBridge rules)
+    Value: !GetAtt ScreenshotFunction.Arn
