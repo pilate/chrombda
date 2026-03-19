@@ -28,8 +28,6 @@ RUN apt-get update \
     && mv chrome-headless-shell-linux64 /opt/chrome-headless-shell \
     && ln -s /opt/chrome-headless-shell/chrome-headless-shell /usr/local/bin/chrome-headless-shell \
     && rm chrome-headless-shell-linux64.zip \
-    && apt-get purge -y wget unzip \
-    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LAMBDA_TASK_ROOT=/var/task

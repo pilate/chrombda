@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Chrombda - Lambda-based screenshot service using headless Chrome
 
 # To schedule screenshots via CloudWatch Events, create a rule targeting
-# the ScreenshotFunction with this input format:
+# the CrawlFunction with this input format:
 #
 #   {"source": "aws.events", "detail": {"url": "https://example.com"}}
 #
@@ -51,7 +51,7 @@ Resources:
                   - s3:PutObject
                 Resource: !Sub "${Bucket.Arn}/*"
 
-  ScreenshotFunction:
+  CrawlFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "chrombda-${Environment}"
@@ -71,7 +71,7 @@ Resources:
   EventsPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref ScreenshotFunction
+      FunctionName: !Ref CrawlFunction
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
 
@@ -84,13 +84,13 @@ Resources:
   FunctionUrl:
     Type: AWS::Lambda::Url
     Properties:
-      TargetFunctionArn: !GetAtt ScreenshotFunction.Arn
+      TargetFunctionArn: !GetAtt CrawlFunction.Arn
       AuthType: NONE
 
   FunctionUrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref ScreenshotFunction
+      FunctionName: !Ref CrawlFunction
       Action: lambda:InvokeFunctionUrl
       Principal: "*"
       FunctionUrlAuthType: NONE
@@ -104,4 +104,4 @@ Outputs:
     Value: !Ref Bucket
   FunctionArn:
     Description: Lambda function ARN (use this when creating EventBridge rules)
-    Value: !GetAtt ScreenshotFunction.Arn
+    Value: !GetAtt CrawlFunction.Arn
