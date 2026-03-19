@@ -29,6 +29,7 @@ LOGGER.setLevel(logging.INFO)
 BUCKET = os.environ["BUCKET"]
 
 _BOTO_SESSION = aiobotocore.session.get_session()
+_LOOP = asyncio.new_event_loop()
 _S3_CLIENT = None
 
 
@@ -148,7 +149,7 @@ def lambda_handler(event, context):
         await upload(png_bytes, mhtml_str, base, ts)
         return base, ts
 
-    base, ts = asyncio.run(run())
+    base, ts = _LOOP.run_until_complete(run())
     LOGGER.info("Saved screenshot and snapshot for %s", url)
 
     return {
