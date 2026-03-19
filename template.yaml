@@ -37,9 +37,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service:
-                - lambda.amazonaws.com
-                - events.amazonaws.com
+              Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
@@ -68,8 +66,6 @@ Resources:
       Environment:
         Variables:
           BUCKET: !Ref Bucket
-          CDIPY_CACHE: /tmp/cdipy-cache
-          HOME: /tmp
 
   # Allow EventBridge to invoke the function
   EventsPermission:

@@ -8,7 +8,7 @@ import shutil
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-import boto3
+import aiobotocore.session
 import pybase64 as base64
 
 # Chrome needs a writable HOME for .local, .config, etc.
@@ -26,8 +26,8 @@ from cdipy import ChromeDevTools, ChromeDevToolsTarget, ChromeRunner
 LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.INFO)
 
-S3 = boto3.client("s3")
 BUCKET = os.environ["BUCKET"]
+S3_SESSION = aiobotocore.session.get_session()
 
 CHROME_ARGS = [
     "--no-sandbox",
@@ -38,7 +38,8 @@ CHROME_ARGS = [
 ]
 
 
-async def take_screenshot(url: str) -> bytes:
+async def crawl(url: str) -> tuple[bytes, str]:
+    """Take a screenshot and capture MHTML snapshot. Returns (png_bytes, mhtml_str)."""
     chrome = ChromeRunner(ignore_cleanup_errors=True)
     try:
         await chrome.launch(extra_args=CHROME_ARGS)
@@ -61,18 +62,45 @@ async def take_screenshot(url: str) -> bytes:
         except asyncio.TimeoutError:
             LOGGER.warning("Page load event did not fire within 15s for %s", url)
 
-        response = await cdit.Page.captureScreenshot(format="png")
-        return base64.b64decode(response["data"])
+        screenshot_resp, snapshot_resp = await asyncio.gather(
+            cdit.Page.captureScreenshot(format="png"),
+            cdit.Page.captureSnapshot(format="mhtml"),
+        )
+
+        png_bytes = base64.b64decode(screenshot_resp["data"])
+        mhtml_str = snapshot_resp["data"]
+
+        return png_bytes, mhtml_str
     finally:
         del chrome
 
 
-def s3_key_for(url: str) -> str:
+async def upload(png_bytes: bytes, mhtml_str: str, base: str, ts: str):
+    """Upload screenshot and snapshot to S3 concurrently."""
+    async with S3_SESSION.create_client("s3") as s3:
+        await asyncio.gather(
+            s3.put_object(
+                Bucket=BUCKET,
+                Key=f"screenshots/{base}/{ts}.png",
+                Body=png_bytes,
+                ContentType="image/png",
+            ),
+            s3.put_object(
+                Bucket=BUCKET,
+                Key=f"snapshots/{base}/{ts}.mhtml",
+                Body=mhtml_str.encode(),
+                ContentType="multipart/related",
+            ),
+        )
+
+
+def s3_key_parts(url: str) -> tuple[str, str]:
+    """Returns (path_base, timestamp) for constructing S3 keys."""
     domain = urlparse(url).netloc or "unknown"
     clean_domain = re.sub(r"[^a-zA-Z0-9-]", "-", domain)
     url_hash = hashlib.sha256(url.encode()).hexdigest()[:12]
     now = datetime.now(timezone.utc)
-    return f"screenshots/{clean_domain}/{url_hash}/{now:%Y%m%d-%H%M%S}.png"
+    return f"{clean_domain}/{url_hash}", f"{now:%Y%m%d-%H%M%S}"
 
 
 def extract_url(event: dict) -> str | None:
@@ -98,8 +126,6 @@ def extract_url(event: dict) -> str | None:
 
 
 def lambda_handler(event, context):
-    LOGGER.info("Event: %s", json.dumps(event, default=str))
-
     url = extract_url(event)
     if not url:
         return {
@@ -107,11 +133,19 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "Missing required parameter: url"}),
         }
 
-    screenshot_bytes = asyncio.run(take_screenshot(url))
-    key = s3_key_for(url)
-    S3.put_object(
-        Bucket=BUCKET, Key=key, Body=screenshot_bytes, ContentType="image/png"
-    )
-    LOGGER.info("Saved to s3://%s/%s", BUCKET, key)
+    async def run():
+        png_bytes, mhtml_str = await crawl(url)
+        base, ts = s3_key_parts(url)
+        await upload(png_bytes, mhtml_str, base, ts)
+        return base, ts
 
-    return {"statusCode": 200, "body": json.dumps({"key": key})}
+    base, ts = asyncio.run(run())
+    LOGGER.info("Saved screenshot and snapshot for %s", url)
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "screenshot": f"screenshots/{base}/{ts}.png",
+            "snapshot": f"snapshots/{base}/{ts}.mhtml",
+        }),
+    }
