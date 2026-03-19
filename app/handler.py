@@ -27,7 +27,16 @@ LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.INFO)
 
 BUCKET = os.environ["BUCKET"]
-S3_SESSION = aiobotocore.session.get_session()
+
+_BOTO_SESSION = aiobotocore.session.get_session()
+_S3_CLIENT = None
+
+
+async def get_s3():
+    global _S3_CLIENT
+    if _S3_CLIENT is None:
+        _S3_CLIENT = await _BOTO_SESSION.create_client("s3").__aenter__()
+    return _S3_CLIENT
 
 CHROME_ARGS = [
     "--no-sandbox",
@@ -77,21 +86,21 @@ async def crawl(url: str) -> tuple[bytes, str]:
 
 async def upload(png_bytes: bytes, mhtml_str: str, base: str, ts: str):
     """Upload screenshot and snapshot to S3 concurrently."""
-    async with S3_SESSION.create_client("s3") as s3:
-        await asyncio.gather(
-            s3.put_object(
-                Bucket=BUCKET,
-                Key=f"screenshots/{base}/{ts}.png",
-                Body=png_bytes,
-                ContentType="image/png",
-            ),
-            s3.put_object(
-                Bucket=BUCKET,
-                Key=f"snapshots/{base}/{ts}.mhtml",
-                Body=mhtml_str.encode(),
-                ContentType="multipart/related",
-            ),
-        )
+    s3 = await get_s3()
+    await asyncio.gather(
+        s3.put_object(
+            Bucket=BUCKET,
+            Key=f"screenshots/{base}/{ts}.png",
+            Body=png_bytes,
+            ContentType="image/png",
+        ),
+        s3.put_object(
+            Bucket=BUCKET,
+            Key=f"snapshots/{base}/{ts}.mhtml",
+            Body=mhtml_str.encode(),
+            ContentType="multipart/related",
+        ),
+    )
 
 
 def s3_key_parts(url: str) -> tuple[str, str]:
