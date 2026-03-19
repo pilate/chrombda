@@ -57,11 +57,15 @@ aws events put-rule \
     --state ENABLED \
     --region "${REGION}"
 
-INPUT=$(jq -cn --arg url "$URL" '{"source":"aws.events","detail":{"url":$url}}')
+TARGETS=$(jq -cn \
+    --arg id "$RULE_NAME" \
+    --arg arn "$FUNCTION_ARN" \
+    --arg url "$URL" \
+    '[{Id: $id, Arn: $arn, Input: ({source: "aws.events", detail: {url: $url}} | tostring)}]')
 
 aws events put-targets \
     --rule "${RULE_NAME}" \
-    --targets "Id=${RULE_NAME},Arn=${FUNCTION_ARN},Input=${INPUT}" \
+    --targets "${TARGETS}" \
     --region "${REGION}"
 
 echo ""
