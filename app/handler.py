@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import shutil
+import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -65,12 +66,16 @@ async def crawl(url: str) -> tuple[bytes, str]:
         cdit = ChromeDevToolsTarget(cdi, session["sessionId"])
 
         await cdit.Page.enable()
+        await cdit.Network.enable()
         await cdit.Page.navigate(url=url)
 
         try:
-            await cdit.wait_for("Page.loadEventFired", 15)
+            await cdit.wait_for("Page.loadEventFired", 10)
         except asyncio.TimeoutError:
             LOGGER.warning("Page load event did not fire within 15s for %s", url)
+
+        # Let async content settle
+        await asyncio.sleep(5)
 
         screenshot_resp, snapshot_resp = await asyncio.gather(
             cdit.Page.captureScreenshot(format="png"),
@@ -140,22 +145,25 @@ def lambda_handler(event, context):
     if not url:
         return {
             "statusCode": 400,
-            "body": json.dumps({"error": "Missing required parameter: url"}),
+            "body": json.dumps({"error": "Missing required parameter"}),
         }
 
     async def run():
+        t0 = time.monotonic()
         png_bytes, mhtml_str = await crawl(url)
+        crawl_time = time.monotonic() - t0
         base, ts = s3_key_parts(url)
         await upload(png_bytes, mhtml_str, base, ts)
-        return base, ts
+        return base, ts, crawl_time
 
-    base, ts = _LOOP.run_until_complete(run())
-    LOGGER.info("Saved screenshot and snapshot for %s", url)
+    base, ts, crawl_time = _LOOP.run_until_complete(run())
+    LOGGER.info("Crawled %s in %.1fs", url, crawl_time)
 
     return {
         "statusCode": 200,
         "body": json.dumps({
             "screenshot": f"screenshots/{base}/{ts}.png",
             "snapshot": f"snapshots/{base}/{ts}.mhtml",
+            "crawl_time": round(crawl_time, 2),
         }),
     }

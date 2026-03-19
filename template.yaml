@@ -59,10 +59,10 @@ Resources:
       Code:
         ImageUri: !Ref ImageUri
       Role: !GetAtt LambdaRole.Arn
-      MemorySize: 4096
-      Timeout: 120
+      MemorySize: 1024
+      Timeout: 30
       EphemeralStorage:
-        Size: 1024
+        Size: 512
       Environment:
         Variables:
           BUCKET: !Ref Bucket
