@@ -23,10 +23,10 @@ Parameters:
     Description: ECR image URI for the Lambda function
 
 Resources:
-  ScreenshotBucket:
+  Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "chrombda-${Environment}-screenshots-${AWS::AccountId}"
+      BucketName: !Sub "chrombda-${Environment}-${AWS::AccountId}"
 
   LambdaRole:
     Type: AWS::IAM::Role
@@ -51,7 +51,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - s3:PutObject
-                Resource: !Sub "${ScreenshotBucket.Arn}/*"
+                Resource: !Sub "${Bucket.Arn}/*"
 
   ScreenshotFunction:
     Type: AWS::Lambda::Function
@@ -62,12 +62,14 @@ Resources:
         ImageUri: !Ref ImageUri
       Role: !GetAtt LambdaRole.Arn
       MemorySize: 4096
-      Timeout: 60
+      Timeout: 120
       EphemeralStorage:
         Size: 1024
       Environment:
         Variables:
-          SCREENSHOT_BUCKET: !Ref ScreenshotBucket
+          BUCKET: !Ref Bucket
+          CDIPY_CACHE: /tmp/cdipy-cache
+          HOME: /tmp
 
   # Allow EventBridge to invoke the function
   EventsPermission:
@@ -102,8 +104,8 @@ Outputs:
     Description: Lambda Function URL
     Value: !GetAtt FunctionUrl.FunctionUrl
   BucketName:
-    Description: S3 bucket for screenshots
-    Value: !Ref ScreenshotBucket
+    Description: S3 bucket for generated data
+    Value: !Ref Bucket
   FunctionArn:
     Description: Lambda function ARN (use this when creating EventBridge rules)
     Value: !GetAtt ScreenshotFunction.Arn

@@ -1,14 +1,25 @@
 import asyncio
-import base64
 import hashlib
 import json
 import logging
 import os
 import re
+import shutil
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import boto3
+import pybase64 as base64
+
+# Chrome needs a writable HOME for .local, .config, etc.
+os.environ.setdefault("HOME", "/tmp")
+
+# Copy baked-in cdipy protocol cache to writable /tmp before importing cdipy
+_CACHE_SRC = "/var/task/cdipy-cache"
+_CACHE_DST = os.environ.get("CDIPY_CACHE", "/tmp/cdipy-cache")
+if os.path.isdir(_CACHE_SRC) and not os.path.isdir(_CACHE_DST):
+    shutil.copytree(_CACHE_SRC, _CACHE_DST, copy_function=shutil.copy)
+
 from cdipy import ChromeDevTools, ChromeDevToolsTarget, ChromeRunner
 
 
@@ -16,10 +27,11 @@ LOGGER = logging.getLogger()
 LOGGER.setLevel(logging.INFO)
 
 S3 = boto3.client("s3")
-BUCKET = os.environ["SCREENSHOT_BUCKET"]
+BUCKET = os.environ["BUCKET"]
 
-LAMBDA_CHROME_ARGS = [
+CHROME_ARGS = [
     "--no-sandbox",
+    "--disable-setuid-sandbox",
     "--no-zygote",
     "--single-process",
     "--window-size=1920,1080",
@@ -29,7 +41,8 @@ LAMBDA_CHROME_ARGS = [
 async def take_screenshot(url: str) -> bytes:
     chrome = ChromeRunner(ignore_cleanup_errors=True)
     try:
-        await chrome.launch(extra_args=LAMBDA_CHROME_ARGS)
+        await chrome.launch(extra_args=CHROME_ARGS)
+        LOGGER.info("Chrome started, ws: %s", chrome.websocket_uri)
 
         cdi = ChromeDevTools(chrome.websocket_uri)
         await cdi.connect()

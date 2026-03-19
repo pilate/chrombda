@@ -25,8 +25,8 @@ REGION="${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || echo "us
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 IMAGE_REPO="${ECR_URI}/${ECR_REPO_NAME}"
-IMAGE_TAG="${ENV}-$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
-IMAGE_URI="${IMAGE_REPO}:${IMAGE_TAG}"
+LATEST_TAG="${ENV}-latest"
+IMAGE_URI="${IMAGE_REPO}:${LATEST_TAG}"
 
 echo "==> Deploying ${STACK_NAME} in ${REGION}"
 echo "    Image: ${IMAGE_URI}"
@@ -52,7 +52,7 @@ docker build --platform linux/amd64 --provenance=false -t "${IMAGE_URI}" .
 echo "==> Pushing image to ECR"
 docker push "${IMAGE_URI}"
 
-# Deploy CloudFormation stack
+# Deploy CloudFormation stack (no-op if template unchanged)
 echo "==> Deploying CloudFormation stack: ${STACK_NAME}"
 aws cloudformation deploy \
     --stack-name "${STACK_NAME}" \
@@ -61,6 +61,18 @@ aws cloudformation deploy \
         "Environment=${ENV}" \
         "ImageUri=${IMAGE_URI}" \
     --capabilities CAPABILITY_NAMED_IAM \
+    --region "${REGION}" \
+    --no-fail-on-empty-changeset
+
+# Point Lambda to the freshly pushed image
+echo "==> Updating Lambda function image"
+aws lambda update-function-code \
+    --function-name "chrombda-${ENV}" \
+    --image-uri "${IMAGE_URI}" \
+    --region "${REGION}" \
+    --no-cli-pager
+aws lambda wait function-updated \
+    --function-name "chrombda-${ENV}" \
     --region "${REGION}"
 
 # Print outputs

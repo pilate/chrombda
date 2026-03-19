@@ -1,26 +1,50 @@
 FROM python:3.12-slim
 
-# Install Chrome and its dependencies
+# Install chrome-headless-shell and its dependencies
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         wget \
-        gnupg \
-    && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends google-chrome-stable \
-    && apt-get purge -y wget gnupg \
+        unzip \
+        ca-certificates \
+        fonts-liberation \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libcups2 \
+        libdbus-1-3 \
+        libdrm2 \
+        libgbm1 \
+        libgtk-3-0 \
+        libnspr4 \
+        libnss3 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxkbcommon0 \
+        libxrandr2 \
+    && CHROME_VERSION=$(wget -qO- https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE) \
+    && wget -q "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-headless-shell-linux64.zip" \
+    && unzip chrome-headless-shell-linux64.zip \
+    && mv chrome-headless-shell-linux64 /opt/chrome-headless-shell \
+    && ln -s /opt/chrome-headless-shell/chrome-headless-shell /usr/local/bin/chrome-headless-shell \
+    && rm chrome-headless-shell-linux64.zip \
+    && apt-get purge -y wget unzip \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Lambda Runtime Interface Client
-RUN pip install --no-cache-dir awslambdaric
-
-WORKDIR /app
+ENV LAMBDA_TASK_ROOT=/var/task
+WORKDIR ${LAMBDA_TASK_ROOT}
 
 # Install Python dependencies
 COPY app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir awslambdaric -r requirements.txt
+
+# Pre-cache cdipy protocol files into the image
+ENV CDIPY_CHROME_PATH=/usr/local/bin/chrome-headless-shell
+ENV CDIPY_CACHE=/var/task/cdipy-cache
+RUN python -c "from cdipy.protocol import DOMAINS"
+RUN chmod -R 755 /var/task/cdipy-cache
+ENV CDIPY_CACHE=/tmp/cdipy-cache
 
 # Copy function code
 COPY app/ .
